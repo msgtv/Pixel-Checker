@@ -2,8 +2,8 @@ import asyncio
 import aiohttp
 import json
 
-from tokens import token_manager
-from config import HEADERS
+from src.okens import token_manager
+from src.onfig import HEADERS
 from pprint import pprint
 
 

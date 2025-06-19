@@ -1,4 +1,7 @@
+import json
 import os
+from typing import Dict
+
 import dotenv
 
 ENV_FILE = '.env'
@@ -8,12 +11,28 @@ dotenv.load_dotenv(ENV_FILE)
 BOT_TOKEN = os.getenv('BOT_TOKEN', None)
 CHAT_ID = os.getenv('CHAT_ID', None)
 
-REFRESH_URL = 'https://notpixel.org/api/v1/auth/telegram/refresh'
-TOKENS_PATH = 'tokens.json'
+GROUP_ID = os.getenv('GROUP_ID', None)
 
-MIN_COST = 32
-MESSAGE_SIZE = 3
+REFRESH_URL = 'https://notpixel.org/api/v1/auth/telegram/refresh'
+PIXEL_CHECK_URL = 'https://notpixel.org/api/v1/battle-canvas/pixels/{pixel_id}'
+PIXEL_URL = 'https://t.me/notpixel/app?startapp=x{x}_y{y}_mbattle'
+
+PIXELS_DATA_FILENAME = r'data/pixels.csv'
+TOKENS_PATH = r'data/tokens.json'
+PRICE_TOPICS = r'data/topics.json'
+
+MAX_CONCURRENT = int(os.getenv('MAX_CONCURRENT', 10))
+
+MIN_COST = int(os.getenv('MIN_COST', 4))
+MAX_COST = int(os.getenv('MAX_COST', 64))
+
+MESSAGE_SIZE = int(os.getenv('MESSAGE_SIZE', 16))
+BATCH_DELAY = int(os.getenv('BATCH_DELAY', 120))
 REVERSE = False
+
+BASE_ID = int(os.getenv('BASE_ID', 262401))
+BASE_START = int(os.getenv('BASE_START', 256))
+BASE_END = int(os.getenv('BASE_END', 657))
 
 HEADERS = {
     'accept': 'application/json, text/plain, */*',

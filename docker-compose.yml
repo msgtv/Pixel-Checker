@@ -1,0 +1,9 @@
+services:
+  gifts-buyer:
+    build: .
+    container_name: pixel-checker
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=UTC
+    restart: on-failure:3

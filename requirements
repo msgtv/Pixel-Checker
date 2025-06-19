@@ -1,2 +1,3 @@
 python-dotenv
 aiohttp
+aiogram==3.20

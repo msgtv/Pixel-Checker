@@ -4,9 +4,9 @@ import asyncio
 import aiohttp
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional
 
-from config import REFRESH_URL, TOKENS_PATH
+from src.config import REFRESH_URL, TOKENS_PATH
 
 logger = logging.getLogger(__name__)
 
