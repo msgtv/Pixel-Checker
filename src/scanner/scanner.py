@@ -14,15 +14,14 @@ from src.service.utils import get_id, get_pixel_url, get_check_url
 from src.api.api import api_get_with_refresh
 from src.service.file_handler import FileHandler
 from src.bot.telegram import send_telegram_message
-from src.bot.channel_manager import ChannelManager
-from src.bot.topic_manager import TopicManager
+from src.bot.topic_manager.topic_manager import TopicManager
 from src.config import (
     BOT_TOKEN,
     CHAT_ID,
     HEADERS,
     MIN_COST,
-    PRICE_TOPICS,
     MAX_COST,
+    PRICE_TOPICS,
     BATCH_DELAY,
     MESSAGE_SIZE,
     MAX_MESSAGE_SIZE,
@@ -74,13 +73,6 @@ class PixelScanner:
         self._telegram_batch_delay = 2.0  # секунды
         self._start_time: Optional[datetime] = None
         self.df = None
-
-        # self.channel_manager: ChannelManager = ChannelManager(
-        #     bot_token=BOT_TOKEN,
-        #     price_channels=PRICE_CHANNELS,
-        #     batch_size=MESSAGE_SIZE,
-        #     batch_delay=BATCH_DELAY,
-        # )
 
         self.topic_manager: TopicManager = TopicManager(
             bot_token=BOT_TOKEN,
@@ -169,12 +161,14 @@ class PixelScanner:
             MIN_COST <= cost <= MAX_COST
             and
             cost not in EXCLUDE_COSTS
+            and
+            is_available
         ):
             # msg = f"Найдена ячейка {'' if is_available else '(НЕ ДОСТУПНА ДЛЯ МИНТА)'} за {cost} $PX ({x}, {y}): {link}"
 
             msg = f'{cost} $PX ({x},{y}): {link}'
 
-            logger.info(msg)
+            # logger.info(msg)
             # await self.channel_manager.add_message(cost, x, y, link)
             # await self._queue_telegram_message(msg)
             await self.topic_manager.add_message(
@@ -248,6 +242,9 @@ class PixelScanner:
                 except Exception as telegram_error:
                     logger.error(f"Ошибка отправки финальных Telegram сообщений: {telegram_error}")
 
+    def _clear_progress(self):
+        self.processed_count = 0
+
     async def _update_progress(self, total_cells: int, log_interval: int = 100):
         """Обновить прогресс обработки"""
         async with self._lock:
@@ -263,24 +260,12 @@ class PixelScanner:
                     f"({progress:.1f}%) - {rate:.1f} ячеек/сек - ETA: {eta:.0f}с"
                 )
 
-    def _categorize_results(self, results: List[CellResult]):
-        """Категоризировать результаты по типам"""
-        for result in results:
-            if result.status == CellStatus.FOR_MINT:
-                self.free_cells.append(result)
-            elif result.status == CellStatus.FOR_MINT_NOT_AVAILABLE:
-                self.free_cells_not_available.append(result)
-            elif result.status == CellStatus.AVAILABLE:
-                self.available_cells.append(result)
-            elif result.status == CellStatus.OCCUPIED:
-                self.occupied_cells.append(result)
-            elif result.status == CellStatus.ERROR:
-                self.error_cells.append(result)
-
-    def _get_coordinates(self, min_cost: int = 0) -> List[Tuple[int, int]]:
+    def _get_coordinates(self, min_cost: int = 0, max_cost: int = 8) -> List[Tuple[int, int]]:
         self.df = self.file_handler.read_file(self.pixels_filename, index_col=['x', 'y'])
 
-        indexes = self.df.loc[self.df['cost'] <= min_cost].index.to_list()
+        indexes = self.df.loc[
+            (self.df['cost'] >= min_cost) & (self.df['cost'] <= max_cost)
+        ].index.to_list()
         random.shuffle(indexes)
 
         return indexes
@@ -309,7 +294,7 @@ class PixelScanner:
 
         try:
             while True:
-                coordinates = self._get_coordinates(min_cost=MIN_COST)
+                coordinates = self._get_coordinates(min_cost=MIN_COST, max_cost=MAX_COST)
                 total_cells = len(coordinates)
                 logger.info(f"Всего пикселей для проверки: {total_cells}")
 
@@ -372,6 +357,8 @@ class PixelScanner:
                             logger.info(
                                 f"Повторная попытка {retry_attempt + 1}/{max_retries} для {len(error_coordinates)} ячеек")
 
+                            self.processed_count -= len(error_coordinates)
+
                             retry_tasks = [bounded_check_cell(x, y, session) for x, y in error_coordinates]
                             retry_results = await asyncio.gather(*retry_tasks, return_exceptions=True)
 
@@ -410,11 +397,11 @@ class PixelScanner:
                             if error_coordinates:
                                 await asyncio.sleep(1)  # Пауза между повторными попытками
 
-                    # Категоризируем все результаты
-                    self._categorize_results(processed_results)
-
                     # сохраним информацию о пикселях
                     self._save_pixel_data()
+
+                self._clear_progress()
+
         except KeyboardInterrupt:
             logger.info("Заверщение работы...")
         finally:
@@ -427,16 +414,3 @@ class PixelScanner:
 
             await self._flush_telegram_queue()
             await self.topic_manager.stop()
-
-    def get_statistics(self) -> Dict[str, Any]:
-        """Получить подробную статистику сканирования"""
-        total = len(self.free_cells) + len(self.occupied_cells) + len(self.error_cells)
-        return {
-            'total_processed': total,
-            'free_cells': len(self.free_cells),
-            'occupied_cells': len(self.occupied_cells),
-            'error_cells': len(self.error_cells),
-            'success_rate': (total - len(self.error_cells)) / total * 100 if total > 0 else 0,
-            'free_cell_rate': len(self.free_cells) / total * 100 if total > 0 else 0,
-            'free_cell_links': [cell.link for cell in self.free_cells if cell.link]
-        }
