@@ -21,8 +21,12 @@ class MessageSender:
         self.group_id = group_id
         self.rate_limiter = rate_limiter
 
-    async def send_batch_to_topic(self, topic_id: int, messages: List[PriceMessage],
-                                  price_category: int) -> bool:
+    async def send_batch_to_topic(
+            self,
+            topic_id: int,
+            messages: List[PriceMessage],
+            price_category: int,
+    ) -> bool:
         """Отправить пачку сообщений в тему"""
         await self.rate_limiter.check_group_limit()
         await self.rate_limiter.wait_if_needed()
@@ -79,8 +83,12 @@ class MessageSender:
 
         return False
 
-    async def _send_large_message_in_parts(self, topic_id: int, messages: List[PriceMessage],
-                                           price_category: int) -> bool:
+    async def _send_large_message_in_parts(
+            self,
+            topic_id: int,
+            messages: List[PriceMessage],
+            price_category: int,
+    ) -> bool:
         """Отправить большое сообщение частями"""
         parts = self._split_messages_into_parts(messages)
         success_count = 0

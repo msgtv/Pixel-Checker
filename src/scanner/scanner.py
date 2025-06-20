@@ -1,5 +1,6 @@
 import logging
 import random
+from unittest import case
 
 import aiohttp
 import asyncio
@@ -10,7 +11,7 @@ from datetime import datetime
 from enum import Enum
 
 
-from src.service.utils import get_id, get_pixel_url, get_check_url
+from src.service.utils import get_id, get_pixel_url, get_check_url, get_alert_costs
 from src.api.api import api_get_with_refresh
 from src.service.file_handler import FileHandler
 from src.bot.telegram import send_telegram_message
@@ -19,15 +20,13 @@ from src.config import (
     BOT_TOKEN,
     CHAT_ID,
     HEADERS,
-    MIN_COST,
-    MAX_COST,
     PRICE_TOPICS,
     BATCH_DELAY,
     MESSAGE_SIZE,
     MAX_MESSAGE_SIZE,
     MIN_MESSAGE_SIZE,
     GROUP_ID,
-    EXCLUDE_COSTS,
+    ALERT_COSTS_FILENAME,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,6 +82,23 @@ class PixelScanner:
             max_batch_size=MAX_MESSAGE_SIZE,
             batch_delay=BATCH_DELAY,
         )
+
+        self.alert_costs = get_alert_costs(ALERT_COSTS_FILENAME)
+
+    def _has_alert_for_cost(self, cost: int, is_available: bool) -> bool:
+        pixel_type = self.alert_costs.get(str(cost))
+
+        match pixel_type:
+            case None:
+                return False
+            case 'any':
+                return True
+            case 'available':
+                return is_available
+            case 'lock':
+                return not is_available
+            case _:
+                return False
 
     async def check_cell(self, session: aiohttp.ClientSession, x: int, y: int) -> CellResult:
         """Проверить одну ячейку с улучшенной обработкой ошибок"""
@@ -150,20 +166,14 @@ class PixelScanner:
                 status = CellStatus.FOR_MINT_NOT_AVAILABLE
         else:
             cost: int = meta_data.get('nextPrice', 0)
-            cost = cost and cost / 1_000_000_000
+            cost = cost and int(cost / 1_000_000_000)
 
             if is_available:
                 status = CellStatus.AVAILABLE
             else:
                 status = CellStatus.OCCUPIED
 
-        if (
-            MIN_COST <= cost <= MAX_COST
-            and
-            cost not in EXCLUDE_COSTS
-            and
-            is_available
-        ):
+        if self._has_alert_for_cost(int(cost), is_available):
             # msg = f"Найдена ячейка {'' if is_available else '(НЕ ДОСТУПНА ДЛЯ МИНТА)'} за {cost} $PX ({x}, {y}): {link}"
 
             msg = f'{cost} $PX ({x},{y}): {link}'
@@ -176,6 +186,7 @@ class PixelScanner:
                 x=x,
                 y=y,
                 link=link,
+                is_available=is_available,
             )
 
         checking_result = CellResult(
@@ -260,7 +271,12 @@ class PixelScanner:
                     f"({progress:.1f}%) - {rate:.1f} ячеек/сек - ETA: {eta:.0f}с"
                 )
 
-    def _get_coordinates(self, min_cost: int = 0, max_cost: int = 8) -> List[Tuple[int, int]]:
+    def _get_coordinates(self) -> List[Tuple[int, int]]:
+        costs = [int(x) for x in self.alert_costs]
+
+        min_cost = min(costs)
+        max_cost = max(costs)
+
         self.df = self.file_handler.read_file(self.pixels_filename, index_col=['x', 'y'])
 
         indexes = self.df.loc[
@@ -271,6 +287,7 @@ class PixelScanner:
         return indexes
 
     def _save_pixel_data(self):
+        logger.info('Pixel data successfully saved.')
         self.file_handler.write_file(self.pixels_filename, self.df)
 
     def _update_pixel_data(self, result: CellResult):
@@ -294,7 +311,7 @@ class PixelScanner:
 
         try:
             while True:
-                coordinates = self._get_coordinates(min_cost=MIN_COST, max_cost=MAX_COST)
+                coordinates = self._get_coordinates()
                 total_cells = len(coordinates)
                 logger.info(f"Всего пикселей для проверки: {total_cells}")
 
@@ -405,6 +422,8 @@ class PixelScanner:
         except KeyboardInterrupt:
             logger.info("Заверщение работы...")
         finally:
+            self._save_pixel_data()
+
             # Останавливаем обработчик Telegram и отправляем оставшиеся сообщения
             telegram_task.cancel()
             try:

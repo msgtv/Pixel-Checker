@@ -38,13 +38,13 @@ class MessageQueue:
         self.incomplete_batch_timeout = incomplete_batch_timeout  # Время ожидания неполного батча в секундах
 
         # Основные структуры данных
-        self.message_queues: Dict[int, List[PriceMessage]] = {}  # Очереди сообщений по ценовым категориям
-        self.first_message_time: Dict[int, datetime] = {}  # Время добавления первого сообщения в каждую очередь
+        self.message_queues: Dict[str, List[PriceMessage]] = {}  # Очереди сообщений по ценовым категориям
+        self.first_message_time: Dict[str, datetime] = {}  # Время добавления первого сообщения в каждую очередь
 
         # Асинхронная блокировка для thread-safe операций с очередями
         self._lock = asyncio.Lock()
 
-    async def add_message(self, cost: int, x: int, y: int, link: str):
+    async def add_message(self, cost: int, x: int, y: int, link: str, is_available: bool):
         """
         Добавить сообщение в очередь соответствующей ценовой категории.
 
@@ -56,6 +56,7 @@ class MessageQueue:
             x: Координата X пикселя
             y: Координата Y пикселя
             link: Ссылка на пиксель
+            is_available: Тип пикселя: свободен для покупки или в блоке
         """
         # Создаем объект сообщения с текущим временем
         message = PriceMessage(
@@ -66,13 +67,18 @@ class MessageQueue:
             timestamp=datetime.now()
         )
 
+        if is_available:
+            msg_category = str(cost)
+        else:
+            msg_category = f'_{cost}'
+
         # Используем блокировку для thread-safe доступа к очередям
         async with self._lock:
             # Создаем очередь для категории если её нет, затем добавляем сообщение
-            self.message_queues.setdefault(cost, []).append(message)
-            logger.debug(f"Добавлено сообщение в очередь темы {cost} PX: {cost} PX ({x},{y})")
+            self.message_queues.setdefault(msg_category, []).append(message)
+            logger.debug(f"Добавлено сообщение в очередь {cost} PX: {cost} PX ({x},{y})")
 
-    async def get_ready_batches(self) -> Dict[int, List[PriceMessage]]:
+    async def get_ready_batches(self) -> Dict[str, List[PriceMessage]]:
         """
         Получить готовые к отправке пачки сообщений.
 
@@ -126,7 +132,7 @@ class MessageQueue:
 
         return ready_batches
 
-    async def clear_sent_messages(self, price_category: int):
+    async def clear_sent_messages(self, price_category: str):
         """
         Очистить отправленные сообщения из очереди указанной ценовой категории.
 
@@ -166,21 +172,21 @@ class MessageQueue:
             return messages[start_index:]
         return []
 
-    async def get_queue_stats(self) -> Dict[int, int]:
+    async def get_queue_stats(self) -> Dict[str, int]:
         """
         Получить статистику очередей - количество сообщений в каждой ценовой категории.
 
         Полезно для мониторинга состояния очередей и отладки.
 
         Returns:
-            Dict[int, int]: Словарь {ценовая_категория: количество_сообщений}
+            Dict[str, int]: Словарь {ценовая_категория: количество_сообщений}
         """
         # Используем блокировку для получения консистентного снимка состояния
         async with self._lock:
             # Создаем словарь со статистикой по каждой категории
             return {price: len(messages) for price, messages in self.message_queues.items()}
 
-    async def flush_all_queues(self) -> Dict[int, List[PriceMessage]]:
+    async def flush_all_queues(self) -> Dict[str, List[PriceMessage]]:
         """
         Получить все оставшиеся сообщения для отправки и очистить очереди.
 
@@ -188,7 +194,7 @@ class MessageQueue:
         После вызова этого метода все очереди будут пусты.
 
         Returns:
-            Dict[int, List[PriceMessage]]: Все оставшиеся сообщения по ценовым категориям
+            Dict[str, List[PriceMessage]]: Все оставшиеся сообщения по ценовым категориям
         """
         all_messages = {}  # Результирующий словарь всех сообщений
 

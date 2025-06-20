@@ -36,9 +36,15 @@ class TopicManager:
         self._running = False
         self._batch_task: Optional[asyncio.Task] = None
 
-    async def add_message(self, cost: int, x: int, y: int, link: str):
+    async def add_message(self, cost: int, x: int, y: int, link: str, is_available: bool):
         """Добавить сообщение в очередь"""
-        await self.message_queue.add_message(cost, x, y, link)
+        await self.message_queue.add_message(
+            cost=cost,
+            x=x,
+            y=y,
+            link=link,
+            is_available=is_available,
+        )
 
     async def start(self):
         """Запустить обработку очередей"""

@@ -3,3 +3,4 @@
 .idea
 data/tokens.json
 data/topics.json
+*.ipynb

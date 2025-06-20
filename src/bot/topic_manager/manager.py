@@ -19,24 +19,33 @@ class Manager:
         self.topic_ids_filename = topic_ids_filename
         self.topic_ids = FileHandler.read_json(topic_ids_filename)
 
-    async def get_or_create_topic_id(self, price_category: int) -> Optional[int]:
+    @staticmethod
+    def _generate_topic_name(price_category: str) -> str:
+        is_locked = price_category[0] == '_'
+
+        if is_locked:
+            return f'{price_category.strip("_")} $PX [locked]'
+        return f'{price_category} $PX'
+
+
+    async def get_or_create_topic_id(self, price_category: str) -> Optional[int]:
         """Получить или создать ID темы для ценовой категории"""
-        pc = str(int(price_category))
-        topic_id = self.topic_ids.get(pc, None)
+        topic_id = self.topic_ids.get(price_category, None)
 
         if topic_id is None:
             try:
                 await asyncio.sleep(2)
+                topic_name = self._generate_topic_name(price_category)
                 topic = await self.bot.create_forum_topic(
                     chat_id=self.group_id,
-                    name=f'{pc} $PX'
+                    name=topic_name,
                 )
 
-                self.topic_ids[pc] = topic.message_thread_id
+                self.topic_ids[price_category] = topic.message_thread_id
                 topic_id = topic.message_thread_id
 
                 FileHandler.write_json(self.topic_ids_filename, self.topic_ids)
-                logger.info(f"Создана новая тема '{pc} $PX' с ID {topic_id}")
+                logger.info(f"Создана новая тема '{topic_name}' с ID {topic_id}")
 
             except TelegramRetryAfter as e:
                 logger.warning(f"RetryAfter при создании темы для {price_category}: ожидание {e.retry_after}с")
