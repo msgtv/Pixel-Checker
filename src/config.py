@@ -25,6 +25,7 @@ MAX_CONCURRENT = int(os.getenv('MAX_CONCURRENT', 10))
 
 MIN_COST = int(os.getenv('MIN_COST', 4))
 MAX_COST = int(os.getenv('MAX_COST', 64))
+EXCLUDE_COSTS = [int(x) for x in os.getenv('EXCLUDE_COSTS', '').split(',')]
 
 MESSAGE_SIZE = int(os.getenv('MESSAGE_SIZE', 16))
 BATCH_DELAY = int(os.getenv('BATCH_DELAY', 120))
