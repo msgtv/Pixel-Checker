@@ -304,109 +304,113 @@ class PixelScanner:
         total_cells = 1
 
         try:
-            coordinates = self._get_coordinates(min_cost=MIN_COST)
-            total_cells = len(coordinates)
-            logger.info(f"Всего пикселей для проверки: {total_cells}")
+            while True:
+                coordinates = self._get_coordinates(min_cost=MIN_COST)
+                total_cells = len(coordinates)
+                logger.info(f"Всего пикселей для проверки: {total_cells}")
 
-            # Настройка соединения с оптимизациями
-            timeout_config = aiohttp.ClientTimeout(total=timeout)
-            connector = aiohttp.TCPConnector(
-                limit=max_concurrent,
-                limit_per_host=max_concurrent,
-                ttl_dns_cache=300,  # Кэш DNS на 5 минут
-                use_dns_cache=True,
-                keepalive_timeout=30,
-                enable_cleanup_closed=True
-            )
+                # Настройка соединения с оптимизациями
+                timeout_config = aiohttp.ClientTimeout(total=timeout)
+                connector = aiohttp.TCPConnector(
+                    limit=max_concurrent,
+                    limit_per_host=max_concurrent,
+                    ttl_dns_cache=300,  # Кэш DNS на 5 минут
+                    use_dns_cache=True,
+                    keepalive_timeout=30,
+                    enable_cleanup_closed=True
+                )
 
-            semaphore = asyncio.Semaphore(max_concurrent)
+                semaphore = asyncio.Semaphore(max_concurrent)
 
-            async def bounded_check_cell(x: int, y: int, session: aiohttp.ClientSession) -> CellResult:
-                async with semaphore:
-                    result = await self.check_cell(session, x, y)
-                    await self._update_progress(total_cells)
-                    return result
+                async def bounded_check_cell(x: int, y: int, session: aiohttp.ClientSession) -> CellResult:
+                    async with semaphore:
+                        result = await self.check_cell(session, x, y)
+                        await self._update_progress(total_cells)
+                        return result
 
-            async with aiohttp.ClientSession(
-                    connector=connector,
-                    headers=HEADERS,
-                    timeout=timeout_config
-            ) as session:
-                # Первый проход
-                tasks = [bounded_check_cell(x, y, session) for x, y in coordinates]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+                async with aiohttp.ClientSession(
+                        connector=connector,
+                        headers=HEADERS,
+                        timeout=timeout_config
+                ) as session:
+                    # Первый проход
+                    tasks = [bounded_check_cell(x, y, session) for x, y in coordinates]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                # Обработка результатов и сбор ошибок
-                processed_results = []
-                error_coordinates = []
+                    # Обработка результатов и сбор ошибок
+                    processed_results = []
+                    error_coordinates = []
 
-                for i, result in enumerate(results):
-                    if isinstance(result, Exception):
-                        x, y = coordinates[i]
-                        cell_id = get_id(x, y)
-                        logger.error(f"Исключение при обработке ячейки {cell_id} ({x}, {y}): {result}")
-                        error_result = CellResult(
-                            cell_id=cell_id, x=x, y=y,
-                            status=CellStatus.ERROR,
-                            error=str(result)
-                        )
-                        processed_results.append(error_result)
-                        if retry_errors:
-                            error_coordinates.append((x, y))
-                    else:
-                        processed_results.append(result)
-                        if result.status == CellStatus.ERROR and retry_errors:
-                            error_coordinates.append((result.x, result.y))
+                    for i, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            x, y = coordinates[i]
+                            cell_id = get_id(x, y)
+                            logger.error(f"Исключение при обработке ячейки {cell_id} ({x}, {y}): {result}")
+                            error_result = CellResult(
+                                cell_id=cell_id, x=x, y=y,
+                                status=CellStatus.ERROR,
+                                error=str(result)
+                            )
+                            processed_results.append(error_result)
+                            if retry_errors:
+                                error_coordinates.append((x, y))
+                        else:
+                            processed_results.append(result)
+                            if result.status == CellStatus.ERROR and retry_errors:
+                                error_coordinates.append((result.x, result.y))
 
-                # Повторные попытки для ошибок
-                if retry_errors and error_coordinates:
-                    for retry_attempt in range(max_retries):
-                        if not error_coordinates:
-                            break
+                    # Повторные попытки для ошибок
+                    if retry_errors and error_coordinates:
+                        for retry_attempt in range(max_retries):
+                            if not error_coordinates:
+                                break
 
-                        logger.info(
-                            f"Повторная попытка {retry_attempt + 1}/{max_retries} для {len(error_coordinates)} ячеек")
+                            logger.info(
+                                f"Повторная попытка {retry_attempt + 1}/{max_retries} для {len(error_coordinates)} ячеек")
 
-                        retry_tasks = [bounded_check_cell(x, y, session) for x, y in error_coordinates]
-                        retry_results = await asyncio.gather(*retry_tasks, return_exceptions=True)
+                            retry_tasks = [bounded_check_cell(x, y, session) for x, y in error_coordinates]
+                            retry_results = await asyncio.gather(*retry_tasks, return_exceptions=True)
 
-                        new_error_coordinates = []
-                        for i, result in enumerate(retry_results):
-                            x, y = error_coordinates[i]
+                            new_error_coordinates = []
+                            for i, result in enumerate(retry_results):
+                                x, y = error_coordinates[i]
 
-                            if isinstance(result, Exception):
-                                logger.error(f"Повторная ошибка для ячейки ({x}, {y}): {result}")
-                                if retry_attempt == max_retries - 1:  # Последняя попытка
-                                    cell_id = get_id(x, y)
-                                    error_result = CellResult(
-                                        cell_id=cell_id, x=x, y=y,
-                                        status=CellStatus.ERROR,
-                                        error=f"После {max_retries} попыток: {str(result)}"
-                                    )
-                                    # Обновляем результат в processed_results
+                                if isinstance(result, Exception):
+                                    logger.error(f"Повторная ошибка для ячейки ({x}, {y}): {result}")
+                                    if retry_attempt == max_retries - 1:  # Последняя попытка
+                                        cell_id = get_id(x, y)
+                                        error_result = CellResult(
+                                            cell_id=cell_id, x=x, y=y,
+                                            status=CellStatus.ERROR,
+                                            error=f"После {max_retries} попыток: {str(result)}"
+                                        )
+                                        # Обновляем результат в processed_results
+                                        for j, prev_result in enumerate(processed_results):
+                                            if prev_result.x == x and prev_result.y == y:
+                                                processed_results[j] = error_result
+                                                break
+                                    else:
+                                        new_error_coordinates.append((x, y))
+                                else:
+                                    # Успешный результат - обновляем в processed_results
                                     for j, prev_result in enumerate(processed_results):
                                         if prev_result.x == x and prev_result.y == y:
-                                            processed_results[j] = error_result
+                                            processed_results[j] = result
                                             break
-                                else:
-                                    new_error_coordinates.append((x, y))
-                            else:
-                                # Успешный результат - обновляем в processed_results
-                                for j, prev_result in enumerate(processed_results):
-                                    if prev_result.x == x and prev_result.y == y:
-                                        processed_results[j] = result
-                                        break
 
-                                if result.status == CellStatus.ERROR:
-                                    new_error_coordinates.append((x, y))
+                                    if result.status == CellStatus.ERROR:
+                                        new_error_coordinates.append((x, y))
 
-                        error_coordinates = new_error_coordinates
+                            error_coordinates = new_error_coordinates
 
-                        if error_coordinates:
-                            await asyncio.sleep(1)  # Пауза между повторными попытками
+                            if error_coordinates:
+                                await asyncio.sleep(1)  # Пауза между повторными попытками
 
-                # Категоризируем все результаты
-                self._categorize_results(processed_results)
+                    # Категоризируем все результаты
+                    self._categorize_results(processed_results)
+
+                    # сохраним информацию о пикселях
+                    self._save_pixel_data()
         except KeyboardInterrupt:
             logger.info("Заверщение работы...")
         finally:
@@ -419,9 +423,6 @@ class PixelScanner:
 
             await self._flush_telegram_queue()
             await self.topic_manager.stop()
-
-            # сохраним информацию о пикселях
-            self._save_pixel_data()
 
     def get_statistics(self) -> Dict[str, Any]:
         """Получить подробную статистику сканирования"""

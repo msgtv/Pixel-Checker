@@ -30,11 +30,13 @@ class TopicManager:
             group_id: str,
             topic_ids_filename: str,
             batch_size: int = 5,  # Уменьшили с 7 до 5
+            max_batch_size: int = 20,
             batch_delay: int = 180  # Увеличили с 120 до 180 секунд
     ):
         self.bot = Bot(token=bot_token)
         self.group_id = group_id
         self.batch_size = batch_size
+        self.max_batch_size = max_batch_size
         self.batch_delay = batch_delay
 
         # Словарь для хранения ID тем
@@ -109,7 +111,7 @@ class TopicManager:
     def _get_message_text(self, msg):
         return (
             f"<b>{msg.x},{msg.y}:</b> "
-            f"<a href='{msg.link}'>click</a>"
+            f"<b><a href='{msg.link}'>C L I C K</a></b>"
         )
 
     async def _send_batch_to_topic(self, price_category: int, messages: List[PriceMessage]) -> bool:
@@ -286,43 +288,6 @@ class TopicManager:
         logger.info(f"Отправлено {success_count}/{len(parts)} частей в тему '{price_category} $PX'")
         return success_count > 0
 
-    # async def _process_message_queues(self):
-    #     """Обработать очереди сообщений с адаптивными задержками"""
-    #     base_delay = self.batch_delay
-    #
-    #     while self._running:
-    #         try:
-    #             messages_sent = 0
-    #
-    #             async with self._lock:
-    #                 for price_category, messages in self.message_queues.items():
-    #                     if len(messages) >= self.batch_size:
-    #                         batch = messages[:self.batch_size]
-    #
-    #                         if await self._send_batch_to_topic(price_category, batch):
-    #                             self.message_queues[price_category] = messages[self.batch_size:]
-    #                             messages_sent += len(batch)
-    #                         else:
-    #                             logger.warning(f"Ошибка отправки для категории {price_category}")
-    #
-    #             if messages_sent > 0:
-    #                 logger.info(f"Всего отправлено сообщений: {messages_sent}")
-    #
-    #             # Адаптивная задержка на основе ошибок
-    #             if self._consecutive_errors > 0:
-    #                 adaptive_delay = base_delay * (1.5 ** min(self._consecutive_errors, 5))
-    #                 logger.info(f"Увеличена задержка до {adaptive_delay:.1f}с из-за ошибок")
-    #                 await asyncio.sleep(adaptive_delay)
-    #             else:
-    #                 await asyncio.sleep(base_delay)
-    #
-    #         except asyncio.CancelledError:
-    #             break
-    #         except Exception as e:
-    #             logger.error(f"Ошибка в обработке очередей сообщений: {e}")
-    #             self._consecutive_errors += 1
-    #             await asyncio.sleep(min(base_delay * 2, 300))  # Максимум 5 минут
-
     async def _process_message_queues(self):
         """Обработать очереди сообщений с адаптивными задержками и таймаутом для неполных батчей"""
         base_delay = self.batch_delay
@@ -360,17 +325,18 @@ class TopicManager:
                         if should_send_full_batch or should_send_by_timeout:
                             # Определяем размер батча
                             if should_send_full_batch:
-                                batch = messages[:self.batch_size]
+                                batch = messages[:self.max_batch_size]
                                 logger.debug(f"Отправка полного батча для категории {price_category}")
                             else:
                                 batch = messages  # Отправляем все накопленные сообщения
                                 logger.info(
                                     f"Отправка неполного батча по таймауту для категории {price_category}: {len(batch)} сообщений")
 
+                            size = len(batch)
                             if await self._send_batch_to_topic(price_category, batch):
                                 # Удаляем отправленные сообщения
                                 if should_send_full_batch:
-                                    self.message_queues[price_category] = messages[self.batch_size:]
+                                    self.message_queues[price_category] = messages[size:]
                                 else:
                                     self.message_queues[price_category] = []
 

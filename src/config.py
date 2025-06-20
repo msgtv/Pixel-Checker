@@ -28,6 +28,8 @@ MAX_COST = int(os.getenv('MAX_COST', 64))
 EXCLUDE_COSTS = [int(x) for x in os.getenv('EXCLUDE_COSTS', '').split(',')]
 
 MESSAGE_SIZE = int(os.getenv('MESSAGE_SIZE', 16))
+MAX_MESSAGE_SIZE = int(os.getenv('MAX_MESSAGE_SIZE', 20))
+
 BATCH_DELAY = int(os.getenv('BATCH_DELAY', 120))
 REVERSE = False
 
