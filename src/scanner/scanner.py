@@ -25,6 +25,8 @@ from src.config import (
     MAX_COST,
     BATCH_DELAY,
     MESSAGE_SIZE,
+    MAX_MESSAGE_SIZE,
+    MIN_MESSAGE_SIZE,
     GROUP_ID,
     EXCLUDE_COSTS,
 )
@@ -85,6 +87,8 @@ class PixelScanner:
             group_id=GROUP_ID,
             topic_ids_filename=PRICE_TOPICS,
             batch_size=MESSAGE_SIZE,
+            min_batch_size=MIN_MESSAGE_SIZE,
+            max_batch_size=MAX_MESSAGE_SIZE,
             batch_delay=BATCH_DELAY,
         )
 

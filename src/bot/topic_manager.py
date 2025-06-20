@@ -30,12 +30,14 @@ class TopicManager:
             group_id: str,
             topic_ids_filename: str,
             batch_size: int = 5,  # Уменьшили с 7 до 5
+            min_batch_size: int = 1,
             max_batch_size: int = 20,
             batch_delay: int = 180  # Увеличили с 120 до 180 секунд
     ):
         self.bot = Bot(token=bot_token)
         self.group_id = group_id
         self.batch_size = batch_size
+        self.min_batch_size = min_batch_size
         self.max_batch_size = max_batch_size
         self.batch_delay = batch_delay
 
@@ -289,7 +291,11 @@ class TopicManager:
         return success_count > 0
 
     async def _process_message_queues(self):
-        """Обработать очереди сообщений с адаптивными задержками и таймаутом для неполных батчей"""
+        """
+        Обработать очереди сообщений с адаптивными задержками
+        и таймаутом для неполных батчей
+        (отправляет только последние self.max_batch_size сообщения)
+        """
         base_delay = self.batch_delay
         # Словарь для отслеживания времени первого сообщения в каждой очереди
         first_message_time: Dict[int, datetime] = {}
@@ -313,7 +319,7 @@ class TopicManager:
                             first_message_time[price_category] = current_time
 
                         # Проверяем условия для отправки
-                        should_send_full_batch = len(messages) >= self.batch_size
+                        should_send_full_batch = len(messages) >= self.min_batch_size
 
                         # Проверяем таймаут для неполных батчей
                         time_since_first = (current_time - first_message_time[price_category]).total_seconds()
@@ -325,7 +331,7 @@ class TopicManager:
                         if should_send_full_batch or should_send_by_timeout:
                             # Определяем размер батча
                             if should_send_full_batch:
-                                batch = messages[:self.max_batch_size]
+                                batch = self._get_last_messages(messages)
                                 logger.debug(f"Отправка полного батча для категории {price_category}")
                             else:
                                 batch = messages  # Отправляем все накопленные сообщения
@@ -334,11 +340,8 @@ class TopicManager:
 
                             size = len(batch)
                             if await self._send_batch_to_topic(price_category, batch):
-                                # Удаляем отправленные сообщения
-                                if should_send_full_batch:
-                                    self.message_queues[price_category] = messages[size:]
-                                else:
-                                    self.message_queues[price_category] = []
+                                # Очищаем очередь сообщения
+                                self.message_queues[price_category] = []
 
                                 messages_sent += len(batch)
 
@@ -398,18 +401,18 @@ class TopicManager:
         FileHandler.write_json(self.topic_ids_filename, self.topic_ids)
         logger.info("Менеджер тем остановлен")
 
+    def _get_last_messages(self, messages):
+        if messages:
+            return messages[len(messages) - 1 - self.max_batch_size:]
+        return []
+
     async def flush_all_queues(self):
         """Отправить все оставшиеся сообщения из очередей"""
         async with self._lock:
             for price_category, messages in self.message_queues.items():
+                messages = self._get_last_messages(messages)
                 if messages:
-                    for i in range(0, len(messages), self.batch_size):
-                        batch = messages[i:i + self.batch_size]
-                        await self._send_batch_to_topic(price_category, batch)
-
-                        if i + self.batch_size < len(messages):
-                            await asyncio.sleep(self._min_send_interval)
-
+                    await self._send_batch_to_topic(price_category, messages)
                     self.message_queues[price_category] = []
 
     async def get_queue_stats(self) -> Dict[int, int]:
